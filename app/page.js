@@ -5,63 +5,68 @@ import { useState } from 'react'
 
 const page = () => {
   const [weatherData, setWeatherData] = useState(null);
-  const [city, setCity] = useState('');
+  const [query, setQuery] = useState('');
+  const [detectedCity, setDetectedCity] = useState('');
   const [error, setError] = useState(null);
   const [ans, setans] = useState(null);
 
-  async function askAI(city, weatherData) {
+  async function handleAsk() {
+    if (!query) return;
 
-    if (!weatherData) {
-      setans("No weather data available.");
-      return;
-    }
+    setans("Thinking...");
+    setError(null);
+    setWeatherData(null);
+    setDetectedCity('');
 
     try {
-      const response = await fetch('/api/ask-ai', {
+      // 1. Ask AI to extract the city from the user's general query
+      const extractRes = await fetch('/api/ask-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ city, weatherData }),
+        body: JSON.stringify({ action: 'extract_city', query }),
+      });
+      
+      if (!extractRes.ok) throw new Error("Failed to extract city");
+      const extractData = await extractRes.json();
+      const extractedCity = extractData.city;
+
+      let fetchedWeather = null;
+
+      // 2. If a city was found in the text, fetch its weather
+      if (extractedCity) {
+        setDetectedCity(extractedCity);
+        const weatherRes = await fetch(`/api/weather?city=${encodeURIComponent(extractedCity)}`);
+        
+        if (weatherRes.ok) {
+          fetchedWeather = await weatherRes.json();
+          setWeatherData(fetchedWeather);
+        } else {
+          const wError = await weatherRes.json();
+          setError(wError.error || 'City not found in our database.');
+        }
+      } else {
+        setError('Could not detect a specific city in your question.');
+      }
+
+      // 3. Ask AI for the final advice, passing the query and (optional) weather
+      const adviceRes = await fetch('/api/ask-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'get_advice', 
+          query, 
+          city: extractedCity, 
+          weatherData: fetchedWeather 
+        }),
       });
 
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
+      if (!adviceRes.ok) throw new Error("Failed to get AI advice");
+      const adviceData = await adviceRes.json();
+      setans(adviceData.text || adviceData.error);
 
-      const data = await response.json();
-      setans(data.text || data.error);
-
-    } catch (error) {
-
-      console.error("Error fetching AI response:", error);
-
-      setans("AI failed.");
-    }
-  }
-
-
-
-  async function fetchWeather(city) {
-    if (!city) return;
-    
-    try {
-      const response = await fetch(`/api/weather?city=${encodeURIComponent(city)}`);
-      const data = await response.json();
-
-      if (!response.ok) {
-        setWeatherData(null);
-        setError(data.error || 'City not found.');
-        setans(null);
-        return;
-      }
-
-      setWeatherData(data);
-      setError(null);
-      await askAI(city, data);
     } catch (err) {
-      console.error("Error fetching weather:", err);
-      setWeatherData(null);
-      setError('Failed to fetch weather data.');
-      setans(null);
+      console.error("Error processing request:", err);
+      setans("An error occurred while getting your answer.");
     }
   }
 
@@ -69,27 +74,27 @@ const page = () => {
     <div>
       <div className="p-4 text-center text-white bg-blue-500 font-bold">Weather app</div>
       <div className="p-4 text-center">
-        <h1>Enter City : </h1>
+        <h1>Ask a question : </h1>
         <input
           type="text"
-          className="border-2 border-gray-300 p-2 rounded-lg"
-          placeholder="Ask anything"
-          value={city}
-          onChange={(e) => setCity(e.target.value)}
+          className="border-2 border-gray-300 p-2 rounded-lg w-1/2"
+          placeholder="e.g. Should I travel to Mumbai today?"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
         />
         <button
           className="ml-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-          onClick={() => fetchWeather(city)}
+          onClick={handleAsk}
         >
-          Get Weather
+          Ask AI
         </button>
       </div>
 
       {/* Weather Information */}
       <div>
-        {weatherData && (
+        {weatherData && detectedCity && (
           <div className="p-4 text-center">
-            <h2>Weather in {city.toLocaleLowerCase()}</h2>
+            <h2>Current Weather in {detectedCity}</h2>
             <p>Temperature: {weatherData.temperature}</p>
             <p>Condition: {weatherData.condition}</p>
             <p>Humidity: {weatherData.humidity}</p>
