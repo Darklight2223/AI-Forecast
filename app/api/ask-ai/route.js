@@ -19,14 +19,13 @@ export async function POST(request) {
 
     if (action === 'get_advice') {
       let weatherContext = "No weather data available.";
-      if (city && weatherData) {
+      if (city && weatherData && weatherData.daily) {
         weatherContext = `
-        City: ${city}
-        Local Weather:
-        - Temperature: ${weatherData.temperature}
-        - Condition: ${weatherData.condition}
-        - Humidity: ${weatherData.humidity}
-        - Wind Speed: ${weatherData.windSpeed}
+        City: ${weatherData.location || city}
+        Upcoming Weather Forecast:
+        ${weatherData.daily.time.slice(0, 3).map((date, i) => 
+          `- ${date}: Max ${weatherData.daily.temperature_2m_max[i]}°C, Min ${weatherData.daily.temperature_2m_min[i]}°C, Rain prob ${weatherData.daily.precipitation_probability_max[i]}%, Rain ${weatherData.daily.rain_sum[i]}mm, Showers ${weatherData.daily.showers_sum[i]}mm, Snowfall ${weatherData.daily.snowfall_sum[i]}cm`
+        ).join('\n        ')}
         `;
       }
 
@@ -49,6 +48,25 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid action." }, { status: 400 });
   } catch (error) {
     console.error("Error generating AI response:", error);
+
+    const message = typeof error?.message === "string" ? error.message : "";
+    const normalized = message.toLowerCase();
+    const statusCode =
+      error?.status || error?.statusCode || error?.response?.status || 500;
+    const isQuotaError =
+      statusCode === 429 ||
+      normalized.includes("quota") ||
+      normalized.includes("resource_exhausted") ||
+      normalized.includes("rate limit") ||
+      normalized.includes("rate-limit");
+
+    if (isQuotaError) {
+      return NextResponse.json(
+        { error: "Gemini API limit hit. Please try again later." },
+        { status: 429 }
+      );
+    }
+
     return NextResponse.json(
       { error: "Failed to generate response." },
       { status: 500 }
